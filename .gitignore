@@ -114,3 +114,11 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+
+
+###model folder
+./pretrained_model/*
+
+#pycharm idea
+./.idea/

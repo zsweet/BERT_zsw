@@ -196,13 +196,14 @@ def create_training_instances(input_files, tokenizer, max_seq_length,
         # Empty lines are used as document delimiters
         if not line:
           all_documents.append([])
-        tokens = tokenizer.tokenize(line)
+        tokens = tokenizer.tokenize(line) ### exp:['世', '界', '羽', '联', '巡', '回', '赛','sam', '##ple', 'txt', '123456', '，']
         if tokens:
-          all_documents[-1].append(tokens)
+          all_documents[-1].append(tokens)  #二维列表  [文章，句子 , 句子中的每个词]
 
   # Remove empty documents
   all_documents = [x for x in all_documents if x]
   rng.shuffle(all_documents)
+  print("所有的document一共:{}".format(all_documents))
 
   vocab_words = list(tokenizer.vocab.keys())
   instances = []
@@ -243,12 +244,12 @@ def create_instances_from_document(
   # segments "A" and "B" based on the actual "sentences" provided by the user
   # input.
   instances = []
-  current_chunk = []
+  current_chunk = []   #产生训练集的候选集
   current_length = 0
   i = 0
   while i < len(document):
-    segment = document[i]
-    current_chunk.append(segment)
+    segment = document[i]   ###第i个句子
+    current_chunk.append(segment)   #[句子，单词]
     current_length += len(segment)
     if i == len(document) - 1 or current_length >= target_seq_length:
       if current_chunk:
@@ -265,7 +266,7 @@ def create_instances_from_document(
         tokens_b = []
         # Random next
         is_random_next = False
-        if len(current_chunk) == 1 or rng.random() < 0.5:
+        if len(current_chunk) == 1 or rng.random() < 0.5:   ##随机生成下一个句子
           is_random_next = True
           target_b_length = target_seq_length - len(tokens_a)
 
@@ -273,13 +274,13 @@ def create_instances_from_document(
           # corpora. However, just to be careful, we try to make sure that
           # the random document is not the same as the document
           # we're processing.
-          for _ in range(10):
+          for _ in range(10):   ###尝试查找下一个句子所在的document
             random_document_index = rng.randint(0, len(all_documents) - 1)
             if random_document_index != document_index:
               break
 
           random_document = all_documents[random_document_index]
-          random_start = rng.randint(0, len(random_document) - 1)
+          random_start = rng.randint(0, len(random_document) - 1)   ###从随机查找的document中查找句子
           for j in range(random_start, len(random_document)):
             tokens_b.extend(random_document[j])
             if len(tokens_b) >= target_b_length:
@@ -408,6 +409,7 @@ def truncate_seq_pair(tokens_a, tokens_b, max_num_tokens, rng):
 
 
 def main(_):
+  ### set logging level
   tf.logging.set_verbosity(tf.logging.INFO)
 
   tokenizer = tokenization.FullTokenizer(
@@ -415,18 +417,18 @@ def main(_):
 
   input_files = []
   for input_pattern in FLAGS.input_file.split(","):
-    input_files.extend(tf.gfile.Glob(input_pattern))
+    input_files.extend(tf.gfile.Glob(input_pattern))  ####获得输入文件列表
 
   tf.logging.info("*** Reading from input files ***")
   for input_file in input_files:
     tf.logging.info("  %s", input_file)
 
   rng = random.Random(FLAGS.random_seed)
-  instances = create_training_instances(
+  instances = create_training_instances(    #创建训练实例
       input_files, tokenizer, FLAGS.max_seq_length, FLAGS.dupe_factor,
       FLAGS.short_seq_prob, FLAGS.masked_lm_prob, FLAGS.max_predictions_per_seq,
       rng)
-
+  #print("==============================\n{}".format(instances))
   output_files = FLAGS.output_file.split(",")
   tf.logging.info("*** Writing to output files ***")
   for output_file in output_files:
@@ -437,6 +439,8 @@ def main(_):
 
 
 if __name__ == "__main__":
+  ###zsw : make the 'input_file' 'output_file' 'vocab_file' must set their value
+  ###zsw : the same function = flags.mark_flag_as_required("input_file","output_file","vocab_file")
   flags.mark_flag_as_required("input_file")
   flags.mark_flag_as_required("output_file")
   flags.mark_flag_as_required("vocab_file")

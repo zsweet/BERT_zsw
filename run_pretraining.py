@@ -118,6 +118,7 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
     for name in sorted(features.keys()):
       tf.logging.info("  name = %s, shape = %s" % (name, features[name].shape))
 
+    ###tfRecord input feature
     input_ids = features["input_ids"]
     input_mask = features["input_mask"]
     segment_ids = features["segment_ids"]
@@ -145,6 +146,7 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
      next_sentence_log_probs) = get_next_sentence_output(
          bert_config, model.get_pooled_output(), next_sentence_labels)
 
+    ### add mask_loss and sentence_loss
     total_loss = masked_lm_loss + next_sentence_loss
 
     tvars = tf.trainable_variables()
@@ -155,7 +157,6 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
       (assignment_map, initialized_variable_names
       ) = modeling.get_assignment_map_from_checkpoint(tvars, init_checkpoint)
       if use_tpu:
-
         def tpu_scaffold():
           tf.train.init_from_checkpoint(init_checkpoint, assignment_map)
           return tf.train.Scaffold()
@@ -236,20 +237,22 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
 
   return model_fn
 
-
+                        #           sequence_output,embedding_table,masked_lm_positions,
+                        # masked_lm_ids, masked_lm_weights
 def get_masked_lm_output(bert_config, input_tensor, output_weights, positions,
                          label_ids, label_weights):
   """Get loss and log probs for the masked LM."""
-  input_tensor = gather_indexes(input_tensor, positions)
+  input_tensor = gather_indexes(input_tensor, positions)  ###[batch*mask_length,hidden_size]
+                                                          ###返回的是所有mask位置对应的输出的transformer向量
 
   with tf.variable_scope("cls/predictions"):
     # We apply one more non-linear transformation before the output layer.
     # This matrix is not used after pre-training.
     with tf.variable_scope("transform"):
-      input_tensor = tf.layers.dense(
+      input_tensor = tf.layers.dense(  #####[batch*mask_length,hidden_size]
           input_tensor,
           units=bert_config.hidden_size,
-          activation=modeling.get_activation(bert_config.hidden_act),
+          activation=modeling.get_activation(bert_config.hidden_act),   ###Chinese config gelu
           kernel_initializer=modeling.create_initializer(
               bert_config.initializer_range))
       input_tensor = modeling.layer_norm(input_tensor)
@@ -260,52 +263,56 @@ def get_masked_lm_output(bert_config, input_tensor, output_weights, positions,
         "output_bias",
         shape=[bert_config.vocab_size],
         initializer=tf.zeros_initializer())
-    logits = tf.matmul(input_tensor, output_weights, transpose_b=True)
-    logits = tf.nn.bias_add(logits, output_bias)
-    log_probs = tf.nn.log_softmax(logits, axis=-1)
 
-    label_ids = tf.reshape(label_ids, [-1])
-    label_weights = tf.reshape(label_weights, [-1])
+    ###[batch*mask_length,hidden_size]  matmul with [vocab_size,hidden_size]
+    ###[batch*mask_length,vocab_size]
+    logits = tf.matmul(input_tensor, output_weights, transpose_b=True)  #[batch*mask_length,vocab_size]
+    logits = tf.nn.bias_add(logits, output_bias)
+    log_probs = tf.nn.log_softmax(logits, axis=-1)   ###[batch*mask_length,vocab_size]
+
+    label_ids = tf.reshape(label_ids, [-1])          ###[batch*mask_length]
+    label_weights = tf.reshape(label_weights, [-1])  ###[batch*mask_length]
 
     one_hot_labels = tf.one_hot(
-        label_ids, depth=bert_config.vocab_size, dtype=tf.float32)
+        label_ids, depth=bert_config.vocab_size, dtype=tf.float32)###[batch*mask_length,vocab_size]
 
     # The `positions` tensor might be zero-padded (if the sequence is too
     # short to have the maximum number of predictions). The `label_weights`
     # tensor has a value of 1.0 for every real prediction and 0.0 for the
     # padding predictions.
-    per_example_loss = -tf.reduce_sum(log_probs * one_hot_labels, axis=[-1])
-    numerator = tf.reduce_sum(label_weights * per_example_loss)
-    denominator = tf.reduce_sum(label_weights) + 1e-5
-    loss = numerator / denominator
+    per_example_loss = -tf.reduce_sum(log_probs * one_hot_labels, axis=[-1])  ###[batch*mask_length]
+    numerator = tf.reduce_sum(label_weights * per_example_loss)               ###标量loss   mask result
+    denominator = tf.reduce_sum(label_weights) + 1e-5     ###这是为了转为float？？？？？？
+    loss = numerator / denominator   #average loss
 
   return (loss, per_example_loss, log_probs)
 
 
-def get_next_sentence_output(bert_config, input_tensor, labels):
+def get_next_sentence_output(bert_config, input_tensor, labels):###[batch_size,hidden_size] [batch_size]
   """Get loss and log probs for the next sentence prediction."""
 
   # Simple binary classification. Note that 0 is "next sentence" and 1 is
   # "random sentence". This weight matrix is not used after pre-training.
   with tf.variable_scope("cls/seq_relationship"):
-    output_weights = tf.get_variable(
+    output_weights = tf.get_variable(  ###[2, hidden_size]
         "output_weights",
         shape=[2, bert_config.hidden_size],
         initializer=modeling.create_initializer(bert_config.initializer_range))
     output_bias = tf.get_variable(
         "output_bias", shape=[2], initializer=tf.zeros_initializer())
 
-    logits = tf.matmul(input_tensor, output_weights, transpose_b=True)
+    logits = tf.matmul(input_tensor, output_weights, transpose_b=True)  ###[batch_size,2]
     logits = tf.nn.bias_add(logits, output_bias)
-    log_probs = tf.nn.log_softmax(logits, axis=-1)
-    labels = tf.reshape(labels, [-1])
-    one_hot_labels = tf.one_hot(labels, depth=2, dtype=tf.float32)
-    per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1)
-    loss = tf.reduce_mean(per_example_loss)
+    log_probs = tf.nn.log_softmax(logits, axis=-1)                      ###[batch_size,2]
+    labels = tf.reshape(labels, [-1])       ###[batch_size]
+    one_hot_labels = tf.one_hot(labels, depth=2, dtype=tf.float32)      ###[batch_size,2]
+    per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1)  ###[batch_size]
+    loss = tf.reduce_mean(per_example_loss)  ###average loss
     return (loss, per_example_loss, log_probs)
 
 
-def gather_indexes(sequence_tensor, positions):
+def gather_indexes(sequence_tensor, positions): ###sequence_tensor 是transorformer的输出[batch_size,length,hidden_size]
+                                                ###position是每个case中被mask的位置index，[batch,max_mask_length]，默认max_mask_length长度为20  每个实例：[7,10,15,20,24,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
   """Gathers the vectors at the specific positions over a minibatch."""
   sequence_shape = modeling.get_shape_list(sequence_tensor, expected_rank=3)
   batch_size = sequence_shape[0]
@@ -313,11 +320,11 @@ def gather_indexes(sequence_tensor, positions):
   width = sequence_shape[2]
 
   flat_offsets = tf.reshape(
-      tf.range(0, batch_size, dtype=tf.int32) * seq_length, [-1, 1])
-  flat_positions = tf.reshape(positions + flat_offsets, [-1])
+      tf.range(0, batch_size, dtype=tf.int32) * seq_length, [-1, 1])   ###[batch_size,1]
+  flat_positions = tf.reshape(positions + flat_offsets, [-1])          #获得所有mask的position，并flat成一维
   flat_sequence_tensor = tf.reshape(sequence_tensor,
                                     [batch_size * seq_length, width])
-  output_tensor = tf.gather(flat_sequence_tensor, flat_positions)
+  output_tensor = tf.gather(flat_sequence_tensor, flat_positions)   ###获取被mask位置对应transformer的输出
   return output_tensor
 
 

@@ -121,7 +121,7 @@ class FullTokenizer(object):
     for token in self.basic_tokenizer.tokenize(text):
       for sub_token in self.wordpiece_tokenizer.tokenize(token):
         split_tokens.append(sub_token)
-
+    print("{} ===> {}".format(text,split_tokens))
     return split_tokens
 
   def convert_tokens_to_ids(self, tokens):

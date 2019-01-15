@@ -39,7 +39,7 @@ def create_optimizer(loss, init_lr, num_train_steps, num_warmup_steps, use_tpu):
 
   # Implements linear warmup. I.e., if global_step < num_warmup_steps, the
   # learning rate will be `global_step/num_warmup_steps * init_lr`.
-  if num_warmup_steps:
+  if num_warmup_steps :
     global_steps_int = tf.cast(global_step, tf.int32)
     warmup_steps_int = tf.constant(num_warmup_steps, dtype=tf.int32)
 
