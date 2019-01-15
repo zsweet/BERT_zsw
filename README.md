@@ -1,3 +1,7 @@
+#zsw Modify
+- make floder pretrained_model to store the model(for Chinese model:[Links](https://storage.googleapis.com/bert_models/2018_11_03/chinese_L-12_H-768_A-12.zip))
+- atfer download and unzip the chinese_L-12_H-768_A-12 to pretrained_model folder,can use command to run run_pretraining.py:`python create_pretraining_data.py --input_file=./sample_text.txt --output_file=./sample.output --vocab_file=./pretrained_model/chinese_L-12_H-768_A-12/vocab.txt --random_seed=123` 
+
 # BERT
 
 **\*\*\*\*\* New November 23rd, 2018: Un-normalized multilingual model + Thai +
